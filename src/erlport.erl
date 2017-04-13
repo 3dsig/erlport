@@ -122,9 +122,10 @@ init(Fun) when is_function(Fun, 0) ->
 %% @doc Synchronous event handler
 %% @hidden
 %%
-handle_call(Call={call, _M, _F, _A, Options}, From, State=#state{})
+handle_call(Call={call, _M, _F, _A, Options}, {Pid, _Ref} = From, State)
         when is_list(Options) ->
-    send_request(Call, From, Options, State);
+    NewState = monitor_caller(Pid, State),
+    send_request(Call, From, Options, NewState);
 handle_call(Request, From, State) ->
     Error = {unknown_call, ?MODULE, Request, From},
     {reply, Error, State}.
@@ -159,6 +160,21 @@ handle_info({'EXIT', Pid, {Id, Result}}, State=#state{calls=Calls}) ->
             handle_call_result(Id, Result, State#state{calls=Calls2});
         error ->
             {noreply, State}
+    end;
+handle_info({'DOWN', Ref, process, Pid, _Reason}, State=#state{port=Port, callers=Callers}) ->
+    case orddict:find(Pid, Callers) of
+        error ->
+            {noreply, State};
+        _ ->
+            erlang:demonitor(Ref),
+            Callers2 = orddict:erase(Pid, Callers),
+            case orddict:size(Callers2) of
+                0 ->
+                    port_close(Port),
+                    {stop, shutdown, State#state{callers=Callers2}};
+                _ ->
+                    {noreply, State#state{callers=Callers2}}
+            end
     end;
 handle_info({erlport_timeout, {in, Id}}, State=#state{calls=Calls}) ->
     case orddict:find(Id, Calls) of
@@ -409,4 +425,16 @@ incoming_call(Id, Module, Function, Args, _Context, State=#state{
                 {erlport_timeout, {in, Id}})},
             Calls2 = orddict:store(Id, Info, Calls),
             {noreply, State#state{calls=Calls2}}
+    end.
+
+%%
+%% @doc Add monitor for caller
+%%
+monitor_caller(Pid, State=#state{callers = Callers}) ->
+    case orddict:find(Pid, Callers) of
+        error ->
+            Ref = erlang:monitor(process, Pid),
+            State#state{callers=orddict:store(Pid, Ref, Callers)};
+        _ ->
+            State
     end.

@@ -40,7 +40,9 @@
     % orddict(): CallId -> {From::term(), Timer::reference() | undefined}
     sent = orddict:new() :: list(),
     % orddict(): CallId -> {Pid::pid(), Timer::reference()}
-    calls = orddict:new() :: list()
+    calls = orddict:new() :: list(),
+    % orddict(): CallerId -> Monitor::reference()
+    callers = orddict:new() :: list()
     }).
 
 -endif. % ERLPORT_HRL
